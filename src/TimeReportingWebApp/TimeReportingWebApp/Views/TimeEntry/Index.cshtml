@@ -1,0 +1,267 @@
+﻿@{
+    ViewData["Title"] = "Time Reporting System";
+}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <title>@ViewData["Title"]</title>
+    <style>
+        .calendar-table {
+            width: 100%;
+            table-layout: fixed;
+        }
+
+            .calendar-table th, .calendar-table td {
+                text-align: center;
+                vertical-align: middle;
+                border: 1px solid #ddd;
+                padding: 10px;
+            }
+
+            .calendar-table input {
+                width: 100%;
+                text-align: center;
+            }
+
+        #projectListOverlay {
+            position: fixed;
+            top: 10%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80%;
+            max-width: 600px;
+            background: white;
+            border: 1px solid #ddd;
+            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
+            z-index: 1000;
+            padding: 20px;
+            display: none;
+        }
+
+        #doneButton {
+            margin-top: 10px;
+        }
+
+        .project-item.added {
+            background-color: #d3d3d3;
+        }
+
+        .add-button {
+            float: right;
+            color: white;
+            background-color: green;
+            border: none;
+            border-radius: 5px;
+            padding: 2px 6px;
+        }
+
+        .summary-row {
+            font-weight: bold;
+            background-color: #f1f1f1;
+        }
+
+        .weekly-total {
+            margin-top: 20px;
+            font-size: 1.2em;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2 class="my-4">Time Reporting System</h2>
+        <div class="form-group">
+            <label for="projectSearch">Search Project</label>
+            <input type="text" id="projectSearch" class="form-control" placeholder="Search by client or project name">
+        </div>
+        <div id="projectListOverlay">
+            <ul id="projectList" class="list-group"></ul>
+            <button type="button" id="doneButton" class="btn btn-secondary">Done</button>
+        </div>
+        <div class="my-4">
+            <h4>Weekly Calendar</h4>
+            <table class="calendar-table table table-bordered">
+                <thead>
+                    <tr>
+                        <th>Project</th>
+                        <th>Monday</th>
+                        <th>Tuesday</th>
+                        <th>Wednesday</th>
+                        <th>Thursday</th>
+                        <th>Friday</th>
+                        <th>Saturday</th>
+                        <th>Sunday</th>
+                    </tr>
+                </thead>
+                <tbody id="calendarBody">
+                    <!-- Rows will be dynamically added here -->
+                </tbody>
+                <tfoot>
+                    <tr class="summary-row">
+                        <td>Total Hours</td>
+                        <td id="totalMonday">0</td>
+                        <td id="totalTuesday">0</td>
+                        <td id="totalWednesday">0</td>
+                        <td id="totalThursday">0</td>
+                        <td id="totalFriday">0</td>
+                        <td id="totalSaturday">0</td>
+                        <td id="totalSunday">0</td>
+                    </tr>
+                </tfoot>
+            </table>
+            <div class="weekly-total">Total Hours for the Week: <span id="weeklyTotal">0</span></div>
+            <button type="button" id="saveWeek" class="btn btn-primary">Save Weekly Hours</button>
+        </div>
+    </div>
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script>
+        $(document).ready(function () {
+            // Load all projects when search box is focused
+            $('#projectSearch').on('focus', function () {
+                $('#projectListOverlay').show();
+                $.get('/api/projects', function (projects) {
+                    console.log("Projects retrieved: ", projects); // Debugging log
+                    renderProjectList(projects);
+                }).fail(function (jqXHR, textStatus, errorThrown) {
+                    console.error("Error retrieving projects: ", textStatus, errorThrown); // Debugging log
+                });
+            });
+
+            // Filter projects as the user types
+            $('#projectSearch').on('keyup', function () {
+                var searchText = $(this).val().toLowerCase();
+                $.get('/api/projects', function (projects) {
+                    var filteredProjects = projects.filter(project =>
+                        project.Name && project.Client &&
+                        (project.Name.toLowerCase().includes(searchText) ||
+                            project.Client.toLowerCase().includes(searchText))
+                    );
+                    console.log("Filtered projects: ", filteredProjects); // Debugging log
+                    renderProjectList(filteredProjects);
+                }).fail(function (jqXHR, textStatus, errorThrown) {
+                    console.error("Error filtering projects: ", textStatus, errorThrown); // Debugging log
+                });
+            });
+
+            $(document).on('click', '.add-button', function () {
+                var projectName = $(this).data('project-name');
+                addProjectRow(projectName);
+                $(this).closest('li').addClass('added');
+                updateSummary();
+            });
+
+            $('#doneButton').on('click', function () {
+                $('#projectListOverlay').hide();
+            });
+
+            $(document).on('click', function (event) {
+                if (!$(event.target).closest('#projectSearch, #projectListOverlay').length) {
+                    $('#projectListOverlay').hide();
+                }
+            });
+
+            $(document).on('input', '.hours-input', function () {
+                updateSummary();
+            });
+
+            function renderProjectList(projects) {
+                $('#projectList').empty();
+                projects.forEach(function (project) {
+                    if (project.Name && project.Client) {
+                        var isAdded = $(`#calendarBody tr[data-project-name='${project.Name}']`).length > 0;
+                        var listItem = `<li class="list-group-item project-item ${isAdded ? 'added' : ''}" data-project-name="${project.Name}">
+                                    ${project.Name} - ${project.Client}
+                                    ${isAdded ? '' : `<button class="add-button" data-project-name="${project.Name}">Add</button>`}
+                                </li>`;
+                        $('#projectList').append(listItem);
+                    }
+                });
+            }
+
+            function addProjectRow(projectName) {
+                if ($(`#calendarBody tr[data-project-name='${projectName}']`).length === 0) {
+                    var row = `<tr data-project-name="${projectName}">
+                                <td>${projectName}</td>
+                                <td><input type="number" class="hours-input" data-day="Monday"></td>
+                                <td><input type="number" class="hours-input" data-day="Tuesday"></td>
+                                <td><input type="number" class="hours-input" data-day="Wednesday"></td>
+                                <td><input type="number" class="hours-input" data-day="Thursday"></td>
+                                <td><input type="number" class="hours-input" data-day="Friday"></td>
+                                <td><input type="number" class="hours-input" data-day="Saturday"></td>
+                                <td><input type="number" class="hours-input" data-day="Sunday"></td>
+                            </tr>`;
+                    $('#calendarBody').append(row);
+                }
+            }
+
+            $('#saveWeek').on('click', function () {
+                var timeEntries = [];
+                $('#calendarBody tr').each(function () {
+                    var projectName = $(this).data('project-name');
+                    $(this).find('.hours-input').each(function () {
+                        var hours = parseInt($(this).val()) || 0;
+                        if (hours > 0) {
+                            var timeEntry = {
+                                ConsultantName: 'Consultant', // Replace with dynamic consultant name if needed
+                                ProjectName: projectName,
+                                Activity: 'General', // Replace with specific activity if needed
+                                Hours: hours,
+                                Date: getDateFromDay($(this).data('day'))
+                            };
+                            timeEntries.push(timeEntry);
+                        }
+                    });
+                });
+
+                $.ajax({
+                    url: '/api/timeentry',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(timeEntries),
+                    success: function () {
+                        alert('Weekly time entries saved successfully!');
+                    }
+                });
+            });
+
+            function getDateFromDay(day) {
+                var today = new Date();
+                var dayIndex = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].indexOf(day);
+                var diff = dayIndex - today.getDay();
+                var targetDate = new Date(today.setDate(today.getDate() + diff));
+                return targetDate.toISOString().split('T')[0];
+            }
+
+            function updateSummary() {
+                var totalMonday = 0, totalTuesday = 0, totalWednesday = 0, totalThursday = 0,
+                    totalFriday = 0, totalSaturday = 0, totalSunday = 0;
+
+                $('#calendarBody tr').each(function () {
+                    totalMonday += parseInt($(this).find('input[data-day="Monday"]').val()) || 0;
+                    totalTuesday += parseInt($(this).find('input[data-day="Tuesday"]').val()) || 0;
+                    totalWednesday += parseInt($(this).find('input[data-day="Wednesday"]').val()) || 0;
+                    totalThursday += parseInt($(this).find('input[data-day="Thursday"]').val()) || 0;
+                    totalFriday += parseInt($(this).find('input[data-day="Friday"]').val()) || 0;
+                    totalSaturday += parseInt($(this).find('input[data-day="Saturday"]').val()) || 0;
+                    totalSunday += parseInt($(this).find('input[data-day="Sunday"]').val()) || 0;
+                });
+
+                $('#totalMonday').text(totalMonday);
+                $('#totalTuesday').text(totalTuesday);
+                $('#totalWednesday').text(totalWednesday);
+                $('#totalThursday').text(totalThursday);
+                $('#totalFriday').text(totalFriday);
+                $('#totalSaturday').text(totalSaturday);
+                $('#totalSunday').text(totalSunday);
+
+                var weeklyTotal = totalMonday + totalTuesday + totalWednesday + totalThursday + totalFriday + totalSaturday + totalSunday;
+                $('#weeklyTotal').text(weeklyTotal);
+            }
+        });
+    </script>
+</body>
+</html>
